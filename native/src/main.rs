@@ -1357,9 +1357,56 @@ impl eframe::App for App {
                 action = action.take().or(page_action);
             });
 
+        resize_edges(ui.ctx());
+
         if let Some(action) = action {
             self.apply(action);
         }
+    }
+}
+
+/// A window without the system frame has no resize borders of its own, so the
+/// outer few pixels of the window act as resize handles on every side.
+fn resize_edges(ctx: &egui::Context) {
+    use egui::{CursorIcon, ResizeDirection as Dir};
+    const GRIP: f32 = 6.0;
+    let (maximized, fullscreen) = ctx.input(|i| {
+        let v = i.viewport();
+        (v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false))
+    });
+    if maximized || fullscreen {
+        return;
+    }
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+    // Do not steal the pointer from a drag that started inside the app (slider, seek bar).
+    if ctx.input(|i| i.pointer.any_down() && !i.pointer.primary_pressed()) {
+        return;
+    }
+    let rect = ctx.content_rect();
+    // Corners get a larger grab area than the straight edges.
+    let near = |edge: f32, at: f32, corner: bool| (at - edge).abs() <= if corner { GRIP * 2.5 } else { GRIP };
+    let on_edge = pos.x - rect.left() <= GRIP
+        || rect.right() - pos.x <= GRIP
+        || pos.y - rect.top() <= GRIP
+        || rect.bottom() - pos.y <= GRIP;
+    if !on_edge {
+        return;
+    }
+    let (left, right) = (near(rect.left(), pos.x, true), near(rect.right(), pos.x, true));
+    let (top, bottom) = (near(rect.top(), pos.y, true), near(rect.bottom(), pos.y, true));
+    let (direction, cursor) = match (left, right, top, bottom) {
+        (true, _, true, _) => (Dir::NorthWest, CursorIcon::ResizeNwSe),
+        (_, true, true, _) => (Dir::NorthEast, CursorIcon::ResizeNeSw),
+        (true, _, _, true) => (Dir::SouthWest, CursorIcon::ResizeNeSw),
+        (_, true, _, true) => (Dir::SouthEast, CursorIcon::ResizeNwSe),
+        (true, ..) => (Dir::West, CursorIcon::ResizeHorizontal),
+        (_, true, ..) => (Dir::East, CursorIcon::ResizeHorizontal),
+        (_, _, true, _) => (Dir::North, CursorIcon::ResizeVertical),
+        _ => (Dir::South, CursorIcon::ResizeVertical),
+    };
+    ctx.set_cursor_icon(cursor);
+    if ctx.input(|i| i.pointer.primary_pressed()) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
     }
 }
 
