@@ -1,0 +1,30 @@
+[package]
+name = "ytmusic"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight YouTube Music desktop client for Windows (Rust + WebView2)"
+
+[dependencies]
+wry = "0.57"
+tao = "0.37"
+tray-icon = "0.26"
+webview2-com = "0.39"
+serde_json = "1"
+ureq = "3"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[workspace]
+members = ["native"]
+
+# Small, fast binary: full LTO, single codegen unit, no unwinding tables.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
