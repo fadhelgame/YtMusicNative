@@ -27,13 +27,16 @@ impl Audio {
         Ok(Self { _device: device, player })
     }
 
-    pub fn load(&self, path: &Path) -> Result<(), String> {
+    /// Starts playing a file and returns its duration in seconds (0 if unknown).
+    pub fn load(&self, path: &Path) -> Result<f64, String> {
+        use rodio::Source;
         let file = fs::File::open(path).map_err(|e| e.to_string())?;
         let source = Decoder::try_from(file).map_err(|e| format!("Cannot decode audio: {e}"))?;
+        let duration = source.total_duration().map(|d| d.as_secs_f64()).unwrap_or(0.0);
         self.player.stop();
         self.player.append(source);
         self.player.play();
-        Ok(())
+        Ok(duration)
     }
 
     pub fn stop(&self) {

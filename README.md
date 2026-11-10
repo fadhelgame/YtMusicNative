@@ -7,8 +7,8 @@ Two lightweight YouTube Music desktop clients for Windows, written in Rust.
 | What it is | Fully native client: its own UI and audio player, no browser engine | The official music.youtube.com page in a tiny WebView2 shell |
 | UI | [egui](https://github.com/emilk/egui) | The real YouTube Music web UI |
 | Audio | [rodio](https://github.com/RustAudio/rodio) + [yt-dlp](https://github.com/yt-dlp/yt-dlp) | The official web player |
-| Feature coverage | Search, library playlists, liked songs, queue, synced lyrics | Everything the website does, plus animated lyrics and tray controls |
-| Memory (measured) | ~150 MB, 1 process | ~600 MB, 9 processes |
+| Feature coverage | Home feed, Explore, search, library playlists, liked songs, radio queue, synced lyrics | Everything the website does, plus animated lyrics and tray controls |
+| Memory (measured) | ~100 MB, 1 process | ~600 MB, 9 processes |
 | Stability | Depends on unofficial APIs; can break when YouTube changes | As stable as the website |
 
 > **Unofficial project.** Not affiliated with, endorsed by, or sponsored by Google or YouTube.
@@ -36,8 +36,10 @@ Windows SmartScreen may warn on first launch.
 
 A from-scratch client that never loads the YouTube Music website while you listen.
 
+- Home feed with your personal recommendations (Listen again, Quick picks, mixes) and an Explore page
 - Search songs, browse your library playlists and Liked Music
-- Queue with previous/next, seek, volume; the next track is prefetched for instant transitions
+- Playing a recommended song continues with its radio; the "Up next" panel shows the queue
+- Shuffle, repeat, like, seek, volume; the next track is prefetched for instant transitions
 - Time-synced lyrics that follow the song; click a line to jump to it
 - Near-zero CPU while playing (event-driven UI, a few repaints per second)
 
@@ -55,7 +57,8 @@ Cookies are only sent to `music.youtube.com`.
 - The first track takes about 10 seconds to start (stream extraction plus a delay YouTube requires).
 - Audio is fetched anonymously at 128 kbps AAC; higher Premium bitrates are not used yet.
 - Playlists load their first page only (about 100 tracks).
-- No home feed, recommendations, tray icon, or media-key integration yet.
+- Home and Explore show the first page of shelves only; artist pages are not supported yet.
+- No tray icon or media-key integration yet.
 - Downloaded audio is cached in `%LOCALAPPDATA%\YtMusicNative\cache` (last 40 tracks).
 
 ### Command line
@@ -116,8 +119,8 @@ cargo test --workspace -- --ignored --nocapture
 
 ```
 src/            WebView client (main.rs), lyrics fetcher (lyrics.rs), page overlay (lyrics.js)
-native/src/     Native client: UI (main.rs), InnerTube API (api.rs),
-                audio (player.rs), sign-in (auth.rs)
+native/src/     Native client: app and pages (main.rs), theme and widgets (widgets.rs),
+                InnerTube API (api.rs), audio (player.rs), sign-in (auth.rs)
 ```
 
 ## Disclaimer

@@ -27,7 +27,38 @@ pub struct Track {
 pub struct Playlist {
     pub id: String,
     pub title: String,
+}
+
+/// What happens when a card on Home/Explore is activated.
+#[derive(Clone, Debug)]
+pub enum Target {
+    /// A single song: play it and continue with its radio.
+    Track(Track),
+    /// A playlist or album page (browse id).
+    Browse(String),
+    /// A mix / radio (watch-playlist id).
+    Watch(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct Card {
+    pub title: String,
     pub subtitle: String,
+    pub thumb: String,
+    pub target: Target,
+}
+
+#[derive(Clone, Debug)]
+pub enum Items {
+    Tracks(Vec<Track>),
+    Cards(Vec<Card>),
+}
+
+/// One shelf of the Home / Explore feed, e.g. "Quick picks".
+#[derive(Clone, Debug)]
+pub struct Section {
+    pub title: String,
+    pub items: Items,
 }
 
 pub struct Api {
@@ -90,6 +121,53 @@ impl Api {
         Ok(tracks_in(&v))
     }
 
+    /// The personalised Home feed (generic when signed out).
+    pub fn home(&self) -> Result<Vec<Section>, String> {
+        Ok(sections_in(&self.post("browse", json!({ "browseId": "FEmusic_home" }))?))
+    }
+
+    /// New releases, charts and trending.
+    pub fn explore(&self) -> Result<Vec<Section>, String> {
+        Ok(sections_in(&self.post("browse", json!({ "browseId": "FEmusic_explore" }))?))
+    }
+
+    /// The play queue YouTube Music builds for a song (its radio) or for a mix.
+    pub fn watch_queue(&self, video_id: Option<&str>, playlist_id: Option<&str>) -> Result<Vec<Track>, String> {
+        let mut body = json!({
+            "enablePersistentPlaylistPanel": true,
+            "isAudioOnly": true,
+            "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
+            "watchEndpointMusicSupportedConfigs": { "watchEndpointMusicConfig": {
+                "hasPersistentPlaylistPanel": true,
+                "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+            }}
+        });
+        if let Some(id) = video_id {
+            body["videoId"] = json!(id);
+        }
+        match (playlist_id, video_id) {
+            (Some(list), _) => body["playlistId"] = json!(list),
+            (None, Some(id)) => {
+                body["playlistId"] = json!(format!("RDAMVM{id}"));
+                body["params"] = json!("wAEB");
+            }
+            (None, None) => return Err("Nothing to play".into()),
+        }
+        let v = self.post("next", body)?;
+        let mut items = Vec::new();
+        collect(&v, "playlistPanelVideoRenderer", &mut items);
+        Ok(items.into_iter().filter_map(parse_panel_track).collect())
+    }
+
+    /// Adds or removes a song from Liked Music. Requires sign-in.
+    pub fn set_like(&self, video_id: &str, liked: bool) -> Result<(), String> {
+        if !self.signed_in() {
+            return Err("Sign in to like songs.".into());
+        }
+        let endpoint = if liked { "like/like" } else { "like/removelike" };
+        self.post(endpoint, json!({ "target": { "videoId": video_id } })).map(|_| ())
+    }
+
     pub fn library_playlists(&self) -> Result<Vec<Playlist>, String> {
         let v = self.post("browse", json!({ "browseId": "FEmusic_liked_playlists" }))?;
         let mut items = Vec::new();
@@ -97,7 +175,6 @@ impl Api {
         let mut out: Vec<Playlist> = vec![Playlist {
             id: "VLLM".into(),
             title: "Liked Music".into(),
-            subtitle: "Auto playlist".into(),
         }];
         for item in items {
             let Some(id) = item["navigationEndpoint"]["browseEndpoint"]["browseId"].as_str() else {
@@ -109,7 +186,6 @@ impl Api {
             out.push(Playlist {
                 id: id.to_owned(),
                 title: runs_text(&item["title"]),
-                subtitle: runs_text(&item["subtitle"]),
             });
         }
         Ok(out)
@@ -225,6 +301,108 @@ fn parse_track(r: &Value) -> Option<Track> {
     Some(Track { id, title, artist, album, duration, thumb })
 }
 
+fn bullet_groups(text: &str) -> Vec<String> {
+    text.split('\u{2022}')
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn is_stat(s: &str) -> bool {
+    let s = s.to_lowercase();
+    s.ends_with(" plays") || s.ends_with(" views") || s.ends_with(" likes") || s.ends_with(" subscribers")
+}
+
+fn largest_thumb(thumbnails: &Value) -> String {
+    thumbnails
+        .as_array()
+        .and_then(|t| t.last())
+        .and_then(|t| t["url"].as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn sections_in(v: &Value) -> Vec<Section> {
+    let mut shelves = Vec::new();
+    collect(v, "musicCarouselShelfRenderer", &mut shelves);
+    let mut out = Vec::new();
+    for shelf in shelves {
+        let title = runs_text(&shelf["header"]["musicCarouselShelfBasicHeaderRenderer"]["title"]);
+        let contents = shelf["contents"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let tracks: Vec<Track> = contents
+            .iter()
+            .filter_map(|c| parse_track(&c["musicResponsiveListItemRenderer"]))
+            .collect();
+        let cards: Vec<Card> = contents
+            .iter()
+            .filter_map(|c| parse_card(&c["musicTwoRowItemRenderer"]))
+            .collect();
+        let items = if tracks.len() >= cards.len() && !tracks.is_empty() {
+            Items::Tracks(tracks)
+        } else if !cards.is_empty() {
+            Items::Cards(cards)
+        } else {
+            continue;
+        };
+        if !title.is_empty() {
+            out.push(Section { title, items });
+        }
+    }
+    out
+}
+
+fn parse_card(r: &Value) -> Option<Card> {
+    let title = runs_text(&r["title"]);
+    if title.is_empty() {
+        return None;
+    }
+    let subtitle = runs_text(&r["subtitle"]);
+    let thumb = largest_thumb(&r["thumbnailRenderer"]["musicThumbnailRenderer"]["thumbnail"]["thumbnails"]);
+    let nav = &r["navigationEndpoint"];
+    let target = if let Some(id) = nav["watchEndpoint"]["videoId"].as_str() {
+        // Subtitle looks like "Song • Artist" or "Artist • 12M views".
+        let artist = bullet_groups(&subtitle)
+            .into_iter()
+            .find(|g| !is_stat(g) && !matches!(g.as_str(), "Song" | "Video" | "Single" | "EP" | "Album"))
+            .unwrap_or_default();
+        Target::Track(Track { id: id.to_owned(), title: title.clone(), artist, thumb: thumb.clone(), ..Default::default() })
+    } else if let Some(id) = nav["watchPlaylistEndpoint"]["playlistId"].as_str() {
+        Target::Watch(id.to_owned())
+    } else {
+        let id = nav["browseEndpoint"]["browseId"].as_str()?;
+        // Playlists and albums only; artist and category pages are not supported yet.
+        if !(id.starts_with("VL") || id.starts_with("MPRE")) {
+            return None;
+        }
+        Target::Browse(id.to_owned())
+    };
+    Some(Card { title, subtitle, thumb, target })
+}
+
+/// An entry of the "Up next" panel returned by the `next` endpoint.
+fn parse_panel_track(r: &Value) -> Option<Track> {
+    let id = r["videoId"].as_str()?.to_owned();
+    let title = runs_text(&r["title"]);
+    if title.is_empty() {
+        return None;
+    }
+    let groups = bullet_groups(&runs_text(&r["longBylineText"]));
+    let artist = groups.first().cloned().unwrap_or_default();
+    let album = groups
+        .get(1)
+        .filter(|g| !is_stat(g) && !g.bytes().all(|b| b.is_ascii_digit()))
+        .cloned()
+        .unwrap_or_default();
+    let duration = parse_duration(&runs_text(&r["lengthText"])).unwrap_or(0.0);
+    let thumb = r["thumbnail"]["thumbnails"]
+        .as_array()
+        .and_then(|t| t.first())
+        .and_then(|t| t["url"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    Some(Track { id, title, artist, album, duration, thumb })
+}
+
 /// "3:55" or "1:02:03" -> seconds.
 fn parse_duration(s: &str) -> Option<f64> {
     let s = s.trim();
@@ -258,6 +436,55 @@ mod tests {
         assert_eq!(parse_duration("3:55"), Some(235.0));
         assert_eq!(parse_duration("1:02:03"), Some(3723.0));
         assert_eq!(parse_duration("Queen"), None);
+    }
+
+    fn describe(sections: &[Section]) {
+        for s in sections {
+            match &s.items {
+                Items::Tracks(t) => println!(
+                    "[tracks x{}] {} | first: {:?} / {:?} thumb={}",
+                    t.len(), s.title, t[0].title, t[0].artist, !t[0].thumb.is_empty()
+                ),
+                Items::Cards(c) => println!(
+                    "[cards  x{}] {} | first: {:?} / {:?} -> {} thumb={}",
+                    c.len(), s.title, c[0].title, c[0].subtitle,
+                    match &c[0].target { Target::Track(_) => "track", Target::Browse(_) => "browse", Target::Watch(_) => "watch" },
+                    !c[0].thumb.is_empty()
+                ),
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn live_home_explore_queue() {
+        let api = Api::new(None);
+        let home = api.home().expect("home failed");
+        println!("--- home: {} sections", home.len());
+        describe(&home);
+        let explore = api.explore().expect("explore failed");
+        println!("--- explore: {} sections", explore.len());
+        describe(&explore);
+        assert!(!home.is_empty() || !explore.is_empty());
+
+        let radio = api.watch_queue(Some("BSTsnWoslP4"), None).expect("radio failed");
+        println!("--- radio: {} tracks; first two: {:?}", radio.len(), radio.iter().take(2).map(|t| (&t.title, &t.artist, &t.album, t.duration)).collect::<Vec<_>>());
+        assert!(radio.len() > 5 && radio[0].duration > 0.0);
+
+        // Open the first browse/watch card found, as the UI would.
+        let card = home.iter().chain(&explore).find_map(|s| match &s.items {
+            Items::Cards(c) => c.iter().find(|c| !matches!(c.target, Target::Track(_))).cloned(),
+            _ => None,
+        });
+        if let Some(card) = card {
+            let tracks = match &card.target {
+                Target::Browse(id) => api.playlist_tracks(id),
+                Target::Watch(id) => api.watch_queue(None, Some(id)),
+                Target::Track(_) => unreachable!(),
+            }
+            .expect("card open failed");
+            println!("--- card {:?} ({:?}) -> {} tracks; first: {:?}", card.title, card.target, tracks.len(), tracks.first().map(|t| (&t.title, &t.artist, t.duration, !t.thumb.is_empty())));
+        }
     }
 
     /// Live check against YouTube Music: `cargo test -p ytmusic-native -- --ignored --nocapture`

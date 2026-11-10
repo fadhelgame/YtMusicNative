@@ -9,6 +9,7 @@ repository = "https://github.com/fadhelgame/YtMusicNative"
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "system_fonts"] }
 egui_extras = { version = "0.37", default-features = false, features = ["http", "image"] }
+egui_material_icons = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 rodio = { version = "0.23", default-features = false, features = ["playback", "symphonia-aac", "symphonia-isomp4"] }
 ureq = "3"
