@@ -38,7 +38,8 @@ fn main() -> eframe::Result {
             .with_title("YouTube Music Native")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([760.0, 520.0])
-            .with_icon(window_icon()),
+            .with_icon(window_icon())
+            .with_decorations(false),
         ..Default::default()
     };
     eframe::run_native(
@@ -163,6 +164,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
+        style_window(cc);
         install_fonts(&ctx);
         egui_material_icons::initialize(&ctx);
         apply_theme(&ctx);
@@ -1185,6 +1187,111 @@ fn edge_fade(ui: &egui::Ui, rect: Rect) {
     ui.painter().add(mesh);
 }
 
+const TITLE_BAR: f32 = 34.0;
+const SIDEBAR_WIDTH: f32 = 200.0;
+const QUEUE_WIDTH: f32 = 290.0;
+
+/// The app draws its own title bar: it continues the colours of the panels
+/// below it, so the window has no visible caption strip. Drag to move,
+/// double-click to maximise.
+fn title_bar(ui: &mut egui::Ui, wide: bool) {
+    let rect = ui.max_rect();
+    let ctx = ui.ctx().clone();
+    ui.painter().rect_filled(rect, 0, BG);
+    let side = Rect::from_min_max(rect.min, pos2(rect.left() + SIDEBAR_WIDTH, rect.bottom()));
+    ui.painter().rect_filled(side, 0, SIDE);
+    if wide {
+        let queue = Rect::from_min_max(pos2(rect.right() - QUEUE_WIDTH, rect.top()), rect.max);
+        ui.painter().rect_filled(queue, 0, PANEL);
+    }
+
+    let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+    let drag = ui.interact(rect, ui.scope_id().with("drag"), Sense::click_and_drag());
+    if drag.double_clicked() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+    } else if drag.drag_started_by(egui::PointerButton::Primary) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+
+    sub_ui(ui, rect, Layout::right_to_left(Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        if window_button(ui, WindowGlyph::Close) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        let glyph = if maximized { WindowGlyph::Restore } else { WindowGlyph::Maximize };
+        if window_button(ui, glyph) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+        if window_button(ui, WindowGlyph::Minimize) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    });
+}
+
+/// Minimise / maximise / close button of the custom title bar.
+fn window_button(ui: &mut egui::Ui, glyph: WindowGlyph) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(46.0, TITLE_BAR), Sense::click());
+    if response.hovered() {
+        let fill = if glyph == WindowGlyph::Close { Color32::from_rgb(232, 17, 35) } else { HOVER };
+        ui.painter().rect_filled(rect, 0, fill);
+    }
+    let stroke = egui::Stroke::new(1.0, if response.hovered() { Color32::WHITE } else { ICON });
+    let painter = ui.painter();
+    // Thin line glyphs, like the native Windows 11 caption buttons.
+    let c = rect.center().round() + vec2(0.5, 0.5);
+    let r = 5.0;
+    let square = |offset: egui::Vec2, size: f32| {
+        let rect = Rect::from_min_size(c + offset - vec2(r, r), egui::Vec2::splat(size));
+        painter.rect_stroke(rect, 1, stroke, egui::StrokeKind::Middle);
+    };
+    match glyph {
+        WindowGlyph::Minimize => {
+            painter.line_segment([c + vec2(-r, 0.0), c + vec2(r, 0.0)], stroke);
+        }
+        WindowGlyph::Maximize => square(vec2(0.0, 0.0), 2.0 * r),
+        WindowGlyph::Restore => {
+            square(vec2(2.0, 0.0), 2.0 * r - 2.0);
+            let (x0, x1, y0, y1) = (c.x - r + 2.0, c.x + r, c.y - r, c.y + r - 2.0);
+            painter.line_segment([pos2(x0, y0 + 2.0), pos2(x0, y0)], stroke);
+            painter.line_segment([pos2(x0, y0), pos2(x1, y0)], stroke);
+            painter.line_segment([pos2(x1, y0), pos2(x1, y1)], stroke);
+            painter.line_segment([pos2(x1, y1), pos2(x1 - 2.0, y1)], stroke);
+        }
+        WindowGlyph::Close => {
+            painter.line_segment([c + vec2(-r, -r), c + vec2(r, r)], stroke);
+            painter.line_segment([c + vec2(-r, r), c + vec2(r, -r)], stroke);
+        }
+    }
+    response.clicked()
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum WindowGlyph {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+/// Asks Windows 11 for rounded window corners and no accent border.
+/// (Ignored on Windows 10, which has neither.)
+fn style_window(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    let Ok(handle) = cc.window_handle() else { return };
+    let RawWindowHandle::Win32(win) = handle.as_raw() else { return };
+    let hwnd = HWND(win.hwnd.get() as *mut _);
+    const COLOR_NONE: u32 = 0xFFFF_FFFE;
+    unsafe {
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner as *const _ as *const _, 4);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &COLOR_NONE as *const _ as *const _, 4);
+    }
+}
+
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -1211,25 +1318,30 @@ impl eframe::App for App {
         let panel = |fill: Color32, margin: Margin| egui::Frame::new().fill(fill).inner_margin(margin);
         let mut action = None;
 
+        egui::Panel::top("titlebar")
+            .exact_size(TITLE_BAR)
+            .show_separator_line(false)
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| title_bar(ui, wide));
         egui::Panel::bottom("player")
             .exact_size(74.0)
             .show_separator_line(false)
             .frame(panel(BAR, Margin::ZERO))
             .show(ui, |ui| self.player_bar(ui));
         egui::Panel::left("sidebar")
-            .exact_size(200.0)
+            .exact_size(SIDEBAR_WIDTH)
             .show_separator_line(false)
-            .frame(panel(SIDE, Margin::symmetric(8, 10)))
+            .frame(panel(SIDE, Margin { left: 8, right: 8, top: 0, bottom: 10 }))
             .show(ui, |ui| self.sidebar(ui));
         if wide {
             egui::Panel::right("queue")
-                .exact_size(290.0)
+                .exact_size(QUEUE_WIDTH)
                 .show_separator_line(false)
-                .frame(panel(PANEL, Margin::symmetric(8, 10)))
+                .frame(panel(PANEL, Margin { left: 8, right: 8, top: 0, bottom: 10 }))
                 .show(ui, |ui| action = self.queue_panel(ui));
         }
         egui::CentralPanel::default()
-            .frame(panel(BG, Margin { left: 22, right: 22, top: 14, bottom: 0 }))
+            .frame(panel(BG, Margin { left: 22, right: 22, top: 4, bottom: 0 }))
             .show(ui, |ui| {
                 if self.show_lyrics {
                     self.lyrics_view(ui);

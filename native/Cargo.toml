@@ -20,8 +20,10 @@ wry = "0.57"
 tao = "0.37"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Security_Cryptography",
 ] }
+raw-window-handle = "0.6"
 
 [build-dependencies]
 winresource = "0.1"

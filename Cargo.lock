@@ -4830,6 +4830,7 @@ dependencies = [
  "egui_extras",
  "egui_material_icons",
  "image",
+ "raw-window-handle",
  "rodio",
  "serde_json",
  "sha1",
