@@ -1,6 +1,6 @@
 [package]
 name = "ytmusic"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Lightweight YouTube Music desktop client for Windows (Rust + WebView2)"
 license = "MIT"

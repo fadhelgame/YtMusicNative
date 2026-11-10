@@ -4770,7 +4770,7 @@ dependencies = [
 
 [[package]]
 name = "ytmusic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "tao",
@@ -4783,7 +4783,7 @@ dependencies = [
 
 [[package]]
 name = "ytmusic-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui_extras",
