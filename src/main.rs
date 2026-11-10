@@ -323,32 +323,8 @@ impl WindowState {
     }
 }
 
-/// Procedurally drawn icon (red disc, white play triangle) so no image
-/// decoder or asset file is needed.
+/// The app logo as raw 64x64 RGBA (pre-rendered from `assets/icon.png`), so
+/// no image decoder is needed at runtime.
 fn app_icon() -> (Vec<u8>, u32) {
-    const N: u32 = 64;
-    let mut rgba = vec![0u8; (N * N * 4) as usize];
-    let c = (N as f32 - 1.0) / 2.0;
-    let r = N as f32 / 2.0 - 1.0;
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 - c, y as f32 - c);
-            let dist = (fx * fx + fy * fy).sqrt();
-            // 1px anti-aliased edge.
-            let alpha = (r - dist + 0.5).clamp(0.0, 1.0);
-            if alpha <= 0.0 {
-                continue;
-            }
-            // Play triangle pointing right, in unit coords relative to radius.
-            let (ux, uy) = (fx / r, fy / r);
-            let in_triangle = ux > -0.22 && ux < 0.42 && uy.abs() < (0.42 - ux) * 0.58;
-            let (cr, cg, cb) = if in_triangle { (255, 255, 255) } else { (255, 0, 51) };
-            let i = ((y * N + x) * 4) as usize;
-            rgba[i] = cr;
-            rgba[i + 1] = cg;
-            rgba[i + 2] = cb;
-            rgba[i + 3] = (alpha * 255.0) as u8;
-        }
-    }
-    (rgba, N)
+    (include_bytes!("../assets/icon-64.rgba").to_vec(), 64)
 }

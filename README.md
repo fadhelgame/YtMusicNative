@@ -142,3 +142,6 @@ broken selectors or API responses are especially useful.
 ## License
 
 [MIT](LICENSE)
+
+The lyrics font, [Plus Jakarta Sans](https://github.com/tokotype/PlusJakartaSans), is bundled under the
+[SIL Open Font License 1.1](assets/PlusJakartaSans-OFL.txt).

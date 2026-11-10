@@ -37,7 +37,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("YouTube Music Native")
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([760.0, 520.0]),
+            .with_min_inner_size([760.0, 520.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -45,6 +46,32 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+const LOGO_PNG: &[u8] = include_bytes!("../../assets/icon.png");
+/// Font family used for lyrics (Plus Jakarta Sans, falling back to the UI fonts).
+const LYRICS_FONT: &str = "lyrics";
+
+fn window_icon() -> egui::IconData {
+    let image = image::load_from_memory(LOGO_PNG).expect("embedded icon").to_rgba8();
+    let (width, height) = image.dimensions();
+    egui::IconData { rgba: image.into_raw(), width, height }
+}
+
+fn lyrics_font(size: f32) -> FontId {
+    FontId::new(size, egui::FontFamily::Name(LYRICS_FONT.into()))
+}
+
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "PlusJakartaSans".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!("../../assets/PlusJakartaSans-SemiBold.ttf"))),
+    );
+    let mut family = vec!["PlusJakartaSans".to_owned()];
+    family.extend(fonts.families.get(&egui::FontFamily::Proportional).cloned().unwrap_or_default());
+    fonts.families.insert(egui::FontFamily::Name(LYRICS_FONT.into()), family);
+    ctx.set_fonts(fonts);
 }
 
 enum Msg {
@@ -136,6 +163,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
+        install_fonts(&ctx);
         egui_material_icons::initialize(&ctx);
         apply_theme(&ctx);
 
@@ -642,7 +670,11 @@ impl App {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            ui.label(RichText::new(ICON_GRAPHIC_EQ.codepoint).size(22.0).color(ACCENT));
+            ui.add(
+                egui::Image::from_bytes("bytes://logo.png", LOGO_PNG)
+                    .fit_to_exact_size(vec2(28.0, 28.0))
+                    .corner_radius(6),
+            );
             ui.label(RichText::new("YT Music").size(18.0).strong().color(TEXT));
         });
         ui.add_space(14.0);
@@ -1028,18 +1060,26 @@ impl App {
             });
             return;
         };
-        let body = Rect::from_min_max(lyric_rect.min, pos2(lyric_rect.right(), lyric_rect.bottom() - 26.0));
+        // Keep the lyrics clear of the window top and of the source note / player bar.
+        let body = Rect::from_min_max(
+            pos2(lyric_rect.left(), lyric_rect.top() + 14.0),
+            pos2(lyric_rect.right(), lyric_rect.bottom() - 40.0),
+        );
         if found.synced {
             self.synced_lyrics(ui, body, &found);
         } else {
-            sub_ui(ui, body.shrink2(vec2(24.0, 12.0)), Layout::top_down(Align::LEFT), |ui| {
+            sub_ui(ui, body.shrink2(vec2(28.0, 0.0)), Layout::top_down(Align::LEFT), |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    ui.add_space(LYRICS_PAD);
                     for line in &found.lines {
-                        ui.label(RichText::new(&line.text).size(22.0).color(Color32::from_gray(225)));
+                        let text = RichText::new(&line.text).font(lyrics_font(22.0)).color(Color32::from_gray(225));
+                        ui.label(text);
                     }
+                    ui.add_space(LYRICS_PAD);
                 });
             });
         }
+        edge_fade(ui, body);
         let note = if found.synced { "" } else { "  ·  not time-synced" };
         ui.painter().text(
             pos2(lyric_rect.left() + 28.0, lyric_rect.bottom() - 8.0),
@@ -1057,13 +1097,13 @@ impl App {
         let ctx = ui.ctx().clone();
         let position = self.position() + 0.25;
         let active = found.lines.iter().rposition(|l| l.t <= position);
-        let font = FontId::proportional(30.0);
+        let font = lyrics_font(30.0);
         let wrap = (rect.width() - 56.0).max(100.0);
         let painter = ui.painter_at(rect);
         let id = ui.scope_id().with("lyrics");
 
         // Layout every line once per frame (egui caches unchanged galleys).
-        let mut top = 0.0;
+        let mut top = LYRICS_PAD;
         let mut laid = Vec::with_capacity(found.lines.len());
         for (i, line) in found.lines.iter().enumerate() {
             let distance = active.map(|a| (i as i32 - a as i32).unsigned_abs()).unwrap_or(2);
@@ -1076,7 +1116,7 @@ impl App {
             laid.push((top, galley));
             top += height + 20.0;
         }
-        let total = top;
+        let total = top + LYRICS_PAD;
 
         // Smoothly glide towards the active line unless the user is scrolling.
         let now = ctx.input(|i| i.time);
@@ -1121,6 +1161,28 @@ impl App {
             self.seek(t);
         }
     }
+}
+
+/// Empty space above the first and below the last lyric line.
+const LYRICS_PAD: f32 = 40.0;
+
+/// Fades the top and bottom edges of `rect` into the background, so lyric
+/// lines dissolve instead of being cut off mid-glyph.
+fn edge_fade(ui: &egui::Ui, rect: Rect) {
+    const HEIGHT: f32 = 44.0;
+    let mut mesh = egui::Mesh::default();
+    let mut band = |solid: f32, clear: f32| {
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(pos2(rect.left(), solid), BG);
+        mesh.colored_vertex(pos2(rect.right(), solid), BG);
+        mesh.colored_vertex(pos2(rect.right(), clear), Color32::TRANSPARENT);
+        mesh.colored_vertex(pos2(rect.left(), clear), Color32::TRANSPARENT);
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base, base + 2, base + 3);
+    };
+    band(rect.top(), rect.top() + HEIGHT);
+    band(rect.bottom(), rect.bottom() - HEIGHT);
+    ui.painter().add(mesh);
 }
 
 impl eframe::App for App {
