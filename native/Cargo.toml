@@ -1,6 +1,6 @@
 [package]
 name = "ytmusic-native"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Fully native YouTube Music client (Rust + egui), no web engine while playing"
 license = "MIT"
