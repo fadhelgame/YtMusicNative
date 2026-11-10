@@ -3,6 +3,8 @@ name = "ytmusic-native"
 version = "0.1.0"
 edition = "2021"
 description = "Fully native YouTube Music client (Rust + egui), no web engine while playing"
+license = "MIT"
+repository = "https://github.com/fadhelgame/YtMusicNative"
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "system_fonts"] }

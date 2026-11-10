@@ -3,6 +3,8 @@ name = "ytmusic"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight YouTube Music desktop client for Windows (Rust + WebView2)"
+license = "MIT"
+repository = "https://github.com/fadhelgame/YtMusicNative"
 
 [dependencies]
 wry = "0.57"
